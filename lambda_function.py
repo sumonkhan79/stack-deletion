@@ -20,7 +20,7 @@ filters = [
             },
             {
                 'Name': 'tag:Owner',
-                'Values': ['Tutu']
+                'Values': ['Nas']
             }
         ]
 
