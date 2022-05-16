@@ -4,32 +4,36 @@ import json
 import boto3
 import datetime
 import logging
+import stack_retain
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # list of regions
-regions = ['us-east-2']
+runtime_region = os.environ['AWS_REGION']
+logger.info("Working region is: {}".format(runtime_region))
 
 # filters to query ec2 instances. put your filters in json format
 filters = [
             {
-                'Name': 'tag:Name',
-                'Values': ['sample']
+                'Name': 'tag:asv',
+                'Values': ['nas']
             },
             {
                 'Name': 'tag:Owner',
-                'Values': ['Nas']
+                'Values': ['Tutu']
             }
         ]
 
 # time threshold to delete stacks. current threshold is 10 days
-time_threshold = 10
+time_threshold = 0
 
 # get date 10 days ago
 time_now = datetime.datetime.now()
 logger.info("script started "+time_now.strftime('%Y-%m-%d'))
 delta = datetime.timedelta(days=time_threshold)
+logger.info("delta value is: {}".format(delta))
 last_day = (time_now - delta)
+logger.info("last_day is: {}".format(last_day))
 
 def list_ec2_names(region):
     ec2_name_list = []
@@ -51,25 +55,27 @@ def list_ec2_names(region):
                     #get tags and launched time of an ec2 instances
                     tags = instance["Tags"]
                     launch_time = instance["LaunchTime"]
+                    logger.info("Launch time of the instance: {} is:  {}".format(instance,launch_time))
             
                     # if launch time is greater than time threshold get the names of ec2 instances
-                    if launch_time.strftime('%Y-%m-%d') > last_day.strftime('%Y-%m-%d'):
+                    if launch_time.strftime('%Y-%m-%d') <= last_day.strftime('%Y-%m-%d'):
                         for tag in tags:
                             if tag['Key'] == 'Name':
-                                ec2_name_list.append(tag['Value'])
+                                if tag['Value'] not in ec2_name_list:
+                                    ec2_name_list.append(tag['Value'])
             
         except Exception as e:
             print("ERROR: "+str(e))
             logger.error(str(e))
     
-    # return ec2 names                        
-    return ec2_name_list
+    # return ec2 names
     logger.info("ec2 name list: "+str(ec2_name_list))
+    return ec2_name_list
+    
     
     
 def list_cloudformation_stacks(region):
-    delete_stack_list = []
-    keep_stack_list = []
+    stack_list = []
     response = None
     
     try:
@@ -83,18 +89,16 @@ def list_cloudformation_stacks(region):
         try:
             for stack in response["Stacks"]:
                 launch_time = stack["CreationTime"]
-                if launch_time.strftime('%Y-%m-%d') > last_day.strftime('%Y-%m-%d'):
-                    delete_stack_list.append(stack['StackName'])
-                else:
-                    keep_stack_list.append(stack['StackName'])
+                if launch_time.strftime('%Y-%m-%d') <= last_day.strftime('%Y-%m-%d'):
+                    if stack['StackName'] in list_ec2_names(region):
+                        stack_list.append(stack['StackName'])
         except Exception as e:
             print("ERROR: "+str(e))
             logger.error(str(e))
     
     # return stack lists
-    return delete_stack_list, keep_stack_list
-    logger.info("stacks to delete: "+str(delete_stack_list))
-    logger.info("stacks to keep: "+str(keep_stack_list))
+    logger.info("stacks in the list are: "+str(stack_list))
+    return stack_list
     
 def delete_cloudformation_stack(region,stack_name):
     try:
@@ -109,13 +113,16 @@ def delete_cloudformation_stack(region,stack_name):
 
 def lambda_handler(event, context):
     try:
-        for region in regions:
-            ec2_names = list_ec2_names(region)
-            cloudformation_stacks = list_cloudformation_stacks(region)
+        ec2_names = list_ec2_names(runtime_region)
+        cloudformation_stacks = list_cloudformation_stacks(runtime_region)
+        if len(cloudformation_stacks) > 0:
             for stack in cloudformation_stacks:
-                if stack in ec2_names:
-                    delete_cloudformation_stack(region,stack)
-        logger.info("script executed! good bye!!")
+                if stack in ec2_names and stack not in stack_retain.stack_retain_list:
+                    logger.info("Stack to be deleted is: {}".format(stack))
+                    delete_cloudformation_stack(runtime_region,stack)
+        else:
+            logger.info(" These is no stack that meet the deletion criteria and thus nothing will be deleted")
+        logger.info("Lambda execution is completed! good bye!!")
     except Exception as e:
         print("ERROR: "+str(e))
         logger.error(str(e))
