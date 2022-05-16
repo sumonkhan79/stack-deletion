@@ -9,13 +9,15 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # list of regions
-regions = ['us-east-1']
+runtime_region = os.environ['AWS_REGION']
+logger.info("Working region is: {}".format(runtime_region))
+logger.info("stack to be retained from the stack_retain_list are: {}".format(stack_retain.stack_retain_list))
 
 # filters to query ec2 instances. put your filters in json format
 filters = [
             {
-                'Name': 'tag:Name',
-                'Values': ['sample']
+                'Name': 'tag:asv',
+                'Values': ['nas']
             },
             {
                 'Name': 'tag:Owner',
@@ -112,15 +114,15 @@ def delete_cloudformation_stack(region,stack_name):
 
 def lambda_handler(event, context):
     try:
-        for region in regions:
-            ec2_names = list_ec2_names(region)
-            cloudformation_stacks = list_cloudformation_stacks(region)
+        ec2_names = list_ec2_names(runtime_region)
+        cloudformation_stacks = list_cloudformation_stacks(runtime_region)
+        if len(cloudformation_stacks) > 0:
             for stack in cloudformation_stacks:
-                if stack in ec2_names and stack not in stack_retain.stack_retain_list:
+                if stack not in stack_retain.stack_retain_list:
                     logger.info("Stack to be deleted is: {}".format(stack))
-                    delete_cloudformation_stack(region,stack)
-                else:
-                    logger.info("This stack: {} does not meet the deletion criteria and wil not be deleted".format(stack)) 
+                    delete_cloudformation_stack(runtime_region,stack)
+        else:
+            logger.info(" These is no stack that meet the deletion criteria and thus nothing will be deleted")
         logger.info("Lambda execution is completed! good bye!!")
     except Exception as e:
         print("ERROR: "+str(e))
